@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, memo } from "react";
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
@@ -59,6 +59,101 @@ interface AudioParams {
   pitch: number;
   glitchAmount: number;
 }
+
+const Knob = memo(function Knob({
+  label,
+  value,
+  color,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  onChange: (v: number) => void;
+}) {
+  const dragRef = useRef<{ startY: number; startValue: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const rotation = -135 + value * 270;
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragRef.current = { startY: e.clientY, startValue: value };
+      setIsDragging(true);
+
+      const onMouseMove = (me: MouseEvent) => {
+        if (!dragRef.current) return;
+        const delta = dragRef.current.startY - me.clientY;
+        const newVal = Math.max(0, Math.min(1, dragRef.current.startValue + delta / 180));
+        onChange(newVal);
+      };
+
+      const onMouseUp = () => {
+        dragRef.current = null;
+        setIsDragging(false);
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+    },
+    [value, onChange]
+  );
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      onChange(Math.max(0, Math.min(1, value - e.deltaY * 0.003)));
+    },
+    [value, onChange]
+  );
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div
+        className="relative w-10 h-10 select-none"
+        style={{ cursor: isDragging ? "ns-resize" : "grab" }}
+        onMouseDown={handleMouseDown}
+        onWheel={handleWheel}
+        title={`${label}: ${Math.round(value * 100)} — drag up/down or scroll`}
+      >
+        <div
+          className="w-10 h-10 rounded-full border-4 shadow-lg"
+          style={{
+            background: `radial-gradient(circle at 35% 35%, ${color}55, #1a1a1a)`,
+            borderColor: isDragging ? color : "#4b5563",
+            boxShadow: isDragging
+              ? `0 0 18px ${color}cc, 0 0 36px ${color}55, inset 0 2px 4px rgba(0,0,0,0.5)`
+              : `0 0 8px ${color}66, inset 0 2px 4px rgba(0,0,0,0.5)`,
+            transition: "box-shadow 0.1s, border-color 0.1s",
+          }}
+        >
+          <div
+            className="absolute w-1 h-3 rounded-full top-1 left-1/2"
+            style={{
+              background: color,
+              transform: `translateX(-50%) rotate(${rotation}deg)`,
+              transformOrigin: "50% 100%",
+              boxShadow: `0 0 6px ${color}`,
+            }}
+          />
+        </div>
+      </div>
+      <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">{label}</span>
+      <span
+        className="text-xs font-mono font-bold"
+        style={{ color, textShadow: isDragging ? `0 0 8px ${color}` : "none" }}
+      >
+        {Math.round(value * 100)}
+      </span>
+    </div>
+  );
+});
 
 export default function SpeakNGlitch() {
   const [displayText, setDisplayText] = useState("SPEAKN GLITCH");
@@ -599,61 +694,11 @@ export default function SpeakNGlitch() {
     setAmbientGeneration(0);
   }, [power, ambientMode, getAudioCtx]);
 
-  const Knob = ({
-    label,
-    value,
-    param,
-    color,
-  }: {
-    label: string;
-    value: number;
-    param: keyof AudioParams;
-    color: string;
-  }) => {
-    const rotation = -135 + value * 270;
-    return (
-      <div className="flex flex-col items-center gap-1">
-        <div
-          className="relative w-10 h-10 cursor-pointer select-none"
-          onClick={(e) => {
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            const centerX = rect.left + rect.width / 2;
-            const centerY = rect.top + rect.height / 2;
-            const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
-            const normalized = ((angle + Math.PI) / (Math.PI * 2) + 0.625) % 1;
-            setParams((prev) => ({ ...prev, [param]: Math.max(0, Math.min(1, normalized)) }));
-          }}
-          onWheel={(e) => {
-            e.preventDefault();
-            setParams((prev) => ({
-              ...prev,
-              [param]: Math.max(0, Math.min(1, prev[param] - e.deltaY * 0.002)),
-            }));
-          }}
-        >
-          <div
-            className="w-10 h-10 rounded-full border-4 border-gray-600 shadow-lg"
-            style={{
-              background: `radial-gradient(circle at 35% 35%, ${color}44, #1a1a1a)`,
-              boxShadow: `0 0 8px ${color}66, inset 0 2px 4px rgba(0,0,0,0.5)`,
-            }}
-          >
-            <div
-              className="absolute w-1 h-3 rounded-full top-1 left-1/2 -translate-x-1/2 origin-bottom"
-              style={{
-                background: color,
-                transform: `translateX(-50%) rotate(${rotation}deg)`,
-                transformOrigin: "50% 100%",
-                boxShadow: `0 0 4px ${color}`,
-              }}
-            />
-          </div>
-        </div>
-        <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">{label}</span>
-        <span className="text-xs font-mono" style={{ color }}>{Math.round(value * 100)}</span>
-      </div>
-    );
-  };
+  const makeKnobHandler = useCallback(
+    (param: keyof AudioParams) => (v: number) =>
+      setParams((prev) => ({ ...prev, [param]: v })),
+    []
+  );
 
   const displayContent = isGlitching && glitchText ? glitchText : displayText;
 
@@ -987,13 +1032,13 @@ export default function SpeakNGlitch() {
             ◈ FX CONTROL MATRIX ◈
           </div>
           <div className="flex justify-around flex-wrap gap-3">
-            <Knob label="DELAY" value={params.delayTime} param="delayTime" color="#00ffff" />
-            <Knob label="FEED" value={params.feedback} param="feedback" color="#00aaff" />
-            <Knob label="VERB" value={params.reverb} param="reverb" color="#aa44ff" />
-            <Knob label="DIST" value={params.distortion} param="distortion" color="#ff4444" />
-            <Knob label="ACID" value={params.filterFreq} param="filterFreq" color="#ffaa00" />
-            <Knob label="PITCH" value={params.pitch} param="pitch" color="#00ff88" />
-            <Knob label="GLITCH" value={params.glitchAmount} param="glitchAmount" color="#ff00ff" />
+            <Knob label="DELAY" value={params.delayTime} color="#00ffff" onChange={makeKnobHandler("delayTime")} />
+            <Knob label="FEED"  value={params.feedback}   color="#00aaff" onChange={makeKnobHandler("feedback")} />
+            <Knob label="VERB"  value={params.reverb}     color="#aa44ff" onChange={makeKnobHandler("reverb")} />
+            <Knob label="DIST"  value={params.distortion} color="#ff4444" onChange={makeKnobHandler("distortion")} />
+            <Knob label="ACID"  value={params.filterFreq} color="#ffaa00" onChange={makeKnobHandler("filterFreq")} />
+            <Knob label="PITCH" value={params.pitch}      color="#00ff88" onChange={makeKnobHandler("pitch")} />
+            <Knob label="GLITCH" value={params.glitchAmount} color="#ff00ff" onChange={makeKnobHandler("glitchAmount")} />
           </div>
         </div>
 
