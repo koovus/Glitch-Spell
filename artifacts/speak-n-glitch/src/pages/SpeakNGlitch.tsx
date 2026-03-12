@@ -124,7 +124,7 @@ export default function SpeakNGlitch() {
     }
   }, [power, ambientMode]);
 
-  // Ambient loop
+  // Ambient loop — amplifies and drifts the current FX state
   useEffect(() => {
     if (!ambientMode || !power) return;
 
@@ -140,7 +140,7 @@ export default function SpeakNGlitch() {
       if (!ctx || ctx.state === "closed") return;
       if (ctx.state === "suspended") ctx.resume();
 
-      // Speak the text
+      // ── Speech ────────────────────────────────────────────────────────────
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
@@ -152,88 +152,149 @@ export default function SpeakNGlitch() {
           v.name.toLowerCase().includes("microsoft")
       );
       if (robotVoice) utterance.voice = robotVoice;
-      utterance.rate = 0.4 + p.pitch * 0.6;
-      utterance.pitch = 0.1 + p.pitch * 1.2;
-      utterance.volume = 0.85;
+      utterance.rate = Math.max(0.1, 0.4 + p.pitch * 0.5 - p.reverb * 0.2);
+      utterance.pitch = 0.1 + p.pitch * 1.5;
+      utterance.volume = 1;
       window.speechSynthesis.speak(utterance);
 
-      // Drone oscillator layer for ambient texture
+      // ── Build FX chain at full current params ─────────────────────────────
       const masterGain = ctx.createGain();
       masterGain.gain.setValueAtTime(0, ctx.currentTime);
-      masterGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 1.5);
+      masterGain.gain.linearRampToValueAtTime(1.0, ctx.currentTime + 0.3);
 
-      const delayNode = ctx.createDelay(4.0);
-      delayNode.delayTime.value = Math.min(0.05 + p.delayTime * 1.5, 3.8);
+      // Distortion — use current distortion param, boosted
+      const distortion = ctx.createWaveShaper();
+      const distAmt = Math.min(p.distortion * 1.4, 0.98);
+      const dCurve = new Float32Array(512);
+      const k = distAmt * 600;
+      for (let i = 0; i < 512; i++) {
+        const x = (i * 2) / 512 - 1;
+        dCurve[i] = ((Math.PI + k) * x) / (Math.PI + k * Math.abs(x));
+      }
+      distortion.curve = dCurve;
+      distortion.oversample = "4x";
 
+      // Acid bandpass — current filterFreq, resonance pushed hard
+      const acidBP = ctx.createBiquadFilter();
+      acidBP.type = "bandpass";
+      acidBP.frequency.value = 150 + p.filterFreq * 5000;
+      acidBP.Q.value = 4 + p.filterFreq * 24;
+
+      // Lowpass rolloff
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = "lowpass";
+      lowpass.frequency.value = 300 + p.filterFreq * 7000;
+      lowpass.Q.value = 1.5 + p.filterFreq * 6;
+
+      // Delay — current delayTime param
+      const delayNode = ctx.createDelay(5.0);
+      delayNode.delayTime.value = Math.min(0.05 + p.delayTime * 2.0, 4.8);
       const feedbackGain = ctx.createGain();
-      feedbackGain.gain.value = Math.min(p.feedback * 0.88, 0.87);
+      feedbackGain.gain.value = Math.min(p.feedback * 0.95, 0.93);
 
-      const reverbLen = ctx.sampleRate * (2 + p.reverb * 6);
+      // Reverb — long tail based on current reverb param
+      const reverbSecs = 2 + p.reverb * 10;
+      const reverbLen = Math.floor(ctx.sampleRate * reverbSecs);
       const reverbBuf = ctx.createBuffer(2, reverbLen, ctx.sampleRate);
       for (let ch = 0; ch < 2; ch++) {
         const d = reverbBuf.getChannelData(ch);
         for (let i = 0; i < reverbLen; i++) {
-          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / reverbLen, 1.2);
+          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / reverbLen, 0.8);
         }
       }
       const convolver = ctx.createConvolver();
       convolver.buffer = reverbBuf;
 
-      const reverbGain = ctx.createGain();
-      reverbGain.gain.value = Math.min(p.reverb * 1.2, 1.0);
-
+      const reverbSend = ctx.createGain();
+      reverbSend.gain.value = Math.min(p.reverb * 1.8, 1.5);
+      const reverbReturn = ctx.createGain();
+      reverbReturn.gain.value = Math.min(p.reverb * 1.4, 1.2);
       const dryGain = ctx.createGain();
-      dryGain.gain.value = Math.max(0.05, 1 - p.reverb * 0.9);
+      dryGain.gain.value = Math.max(0.02, 1.2 - p.reverb * 1.0);
 
-      const lowpass = ctx.createBiquadFilter();
-      lowpass.type = "lowpass";
-      lowpass.frequency.value = 600 + p.filterFreq * 4000;
-      lowpass.Q.value = 1.5;
+      // ── Oscillators using current pitch + glitch settings ─────────────────
+      const oscCount = 4 + Math.floor(p.glitchAmount * 6);
+      const baseFreqs = [55, 82.5, 110, 165, 220, 330, 440, 55, 27.5];
+      const oscTypes: OscillatorType[] = ["sawtooth", "square", "sawtooth", "triangle", "square", "sawtooth"];
 
-      // Two detuned drones
-      const droneFreqs = [55, 82.5];
-      droneFreqs.forEach((freq, i) => {
+      for (let i = 0; i < oscCount; i++) {
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
-        osc.type = i === 0 ? "sawtooth" : "triangle";
-        osc.frequency.value = freq * (1 + (Math.random() - 0.5) * 0.02);
-        g.gain.value = 0.06;
-        osc.connect(g);
-        g.connect(lowpass);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 5);
-      });
+        osc.type = oscTypes[i % oscTypes.length];
+        const baseF = baseFreqs[i % baseFreqs.length];
+        const glitchMod = p.glitchAmount > 0.2 ? (Math.random() - 0.5) * p.glitchAmount * 0.8 : 0;
+        osc.frequency.value = baseF * (1 + p.pitch * 0.5) * (1 + glitchMod);
 
+        // Pitch LFO sweep for ambient movement
+        osc.frequency.setValueAtTime(osc.frequency.value, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(
+          osc.frequency.value * (1 + (Math.random() - 0.5) * 0.15 * p.glitchAmount),
+          ctx.currentTime + 2 + Math.random() * 3
+        );
+
+        g.gain.value = 0.18 / oscCount;
+        g.gain.setTargetAtTime(0, ctx.currentTime + 5 + Math.random() * 3, 1.5);
+
+        osc.connect(g);
+        g.connect(distortion);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 12);
+      }
+
+      // ── Noise burst (glitch texture) ──────────────────────────────────────
+      if (p.glitchAmount > 0.15) {
+        const noiseLen = Math.floor(ctx.sampleRate * (0.3 + p.glitchAmount * 1.5));
+        const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+        const nd = noiseBuf.getChannelData(0);
+        for (let i = 0; i < noiseLen; i++) {
+          nd[i] = (Math.random() * 2 - 1) * p.glitchAmount * 0.8;
+        }
+        const noiseNode = ctx.createBufferSource();
+        noiseNode.buffer = noiseBuf;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0.35 * p.glitchAmount;
+        noiseNode.connect(noiseGain);
+        noiseGain.connect(distortion);
+        noiseNode.start(ctx.currentTime);
+      }
+
+      // ── Wire everything together ──────────────────────────────────────────
+      distortion.connect(acidBP);
+      acidBP.connect(lowpass);
       lowpass.connect(dryGain);
-      lowpass.connect(convolver);
-      convolver.connect(reverbGain);
+      lowpass.connect(reverbSend);
+      reverbSend.connect(convolver);
+      convolver.connect(reverbReturn);
+
       dryGain.connect(delayNode);
-      reverbGain.connect(delayNode);
+      reverbReturn.connect(delayNode);
       delayNode.connect(feedbackGain);
       feedbackGain.connect(delayNode);
+
       delayNode.connect(masterGain);
       dryGain.connect(masterGain);
-      reverbGain.connect(masterGain);
+      reverbReturn.connect(masterGain);
 
-      masterGain.gain.setTargetAtTime(0, ctx.currentTime + 4, 1.5);
+      masterGain.gain.setTargetAtTime(0, ctx.currentTime + 8, 2.5);
       masterGain.connect(ctx.destination);
 
-      // Drift reverb and delay upward each generation
+      // ── Drift params upward aggressively each generation ──────────────────
       setParams((prev) => ({
         ...prev,
-        reverb: Math.min(prev.reverb + 0.025, 0.96),
-        delayTime: Math.min(prev.delayTime + 0.02, 0.96),
-        feedback: Math.min(prev.feedback + 0.01, 0.87),
+        reverb:    Math.min(prev.reverb    + 0.06, 0.97),
+        delayTime: Math.min(prev.delayTime + 0.05, 0.97),
+        feedback:  Math.min(prev.feedback  + 0.03, 0.92),
+        distortion: Math.min(prev.distortion + 0.03, 0.95),
+        glitchAmount: Math.min(prev.glitchAmount + 0.02, 0.95),
       }));
       setAmbientGeneration((g) => g + 1);
 
-      // Schedule next iteration: 5-9 seconds
-      const next = 5000 + Math.random() * 4000;
+      // Loop every 3–6 seconds
+      const next = 3000 + Math.random() * 3000;
       ambientTimerRef.current = setTimeout(speakAmbient, next);
     };
 
-    // Kick off first play after a short pause
-    ambientTimerRef.current = setTimeout(speakAmbient, 1500);
+    ambientTimerRef.current = setTimeout(speakAmbient, 800);
 
     return () => {
       cancelled = true;
