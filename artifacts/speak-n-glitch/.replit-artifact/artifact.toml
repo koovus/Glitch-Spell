@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Speak 'n Glitch"
+version = "1.0.0"
+id = "artifacts/speak-n-glitch"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 22610
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/speak-n-glitch run dev"
+
+[services.env]
+PORT = "22610"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/speak-n-glitch", "run", "build"]
+publicDir = "artifacts/speak-n-glitch/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
