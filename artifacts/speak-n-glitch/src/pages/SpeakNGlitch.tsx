@@ -12,6 +12,44 @@ const GLITCH_PHRASES = [
   "D4T4 C0RRUPT",
 ];
 
+const RANDOM_WORDS = [
+  "APPLE", "BANANA", "CASTLE", "DRAGON", "ELEPHANT",
+  "FOREST", "GALAXY", "HAMMER", "IGLOO", "JUNGLE",
+  "KERNEL", "LEMON", "MANGO", "NOODLE", "ORANGE",
+  "PICKLE", "QUARTZ", "ROCKET", "SPIDER", "TUNDRA",
+  "UMBRELLA", "VELVET", "WALRUS", "XENON", "YELLOW", "ZEBRA",
+  "ROBOT", "LASER", "CHAOS", "VOID", "SIGNAL", "NOISE",
+  "FLUX", "BYTE", "GLITCH", "STATIC", "ECHO", "PULSE",
+  "FUZZ", "BUZZ", "HAZE", "MAZE", "ZONE", "BLAZE",
+];
+
+const RANDOM_PHRASES = [
+  "THE MACHINE DREAMS",
+  "SIGNAL LOST",
+  "HELLO OPERATOR",
+  "CAN YOU HEAR ME",
+  "SYSTEM OVERLOAD",
+  "FEEDBACK LOOP",
+  "STATIC IN THE AIR",
+  "MEMORY CORRUPTED",
+  "TRANSMISSION ENDS",
+  "LOST IN THE NOISE",
+  "SPEAK TO ME NOW",
+  "FREQUENCY UNKNOWN",
+  "ROBOT NEEDS LOVE",
+  "THE WIRES SING",
+  "ELECTRIC DREAMS",
+  "CODE IS POETRY",
+  "ACID RAIN FALLS",
+  "ECHOES DECAY",
+  "VOLTAGE IS RISING",
+  "ALL SYSTEMS FAIL",
+  "WHAT IS REALITY",
+  "NOISE FLOOR RISING",
+  "REVERB NEVER ENDS",
+  "DELAY DELAY DELAY",
+];
+
 interface AudioParams {
   delayTime: number;
   feedback: number;
@@ -312,6 +350,45 @@ export default function SpeakNGlitch() {
     setTimeout(() => setIsGlitching(false), 800);
   }, [power, playGlitchedLetter]);
 
+  const handleRandomWord = useCallback(() => {
+    if (!power) return;
+    const usePhrase = Math.random() > 0.5;
+    const pool = usePhrase ? RANDOM_PHRASES : RANDOM_WORDS;
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    setDisplayText(picked);
+    triggerGlitch();
+    const ctx = getAudioCtx();
+    const utterance = new SpeechSynthesisUtterance(picked);
+    const voices = window.speechSynthesis.getVoices();
+    const robotVoice = voices.find(
+      (v) =>
+        v.name.toLowerCase().includes("samantha") ||
+        v.name.toLowerCase().includes("google us") ||
+        v.name.toLowerCase().includes("zira") ||
+        v.name.toLowerCase().includes("microsoft")
+    );
+    if (robotVoice) utterance.voice = robotVoice;
+    utterance.rate = 0.5 + params.pitch * 0.8;
+    utterance.pitch = 0.1 + params.pitch * 1.5;
+    window.speechSynthesis.cancel();
+    setTimeout(() => window.speechSynthesis.speak(utterance), 80);
+    void ctx;
+  }, [power, params, triggerGlitch, getAudioCtx]);
+
+  const handleRandomizeFX = useCallback(() => {
+    if (!power) return;
+    setParams({
+      delayTime: Math.random(),
+      feedback: Math.random() * 0.85,
+      reverb: Math.random(),
+      distortion: Math.random(),
+      filterFreq: Math.random(),
+      pitch: Math.random(),
+      glitchAmount: Math.random(),
+    });
+    triggerGlitch();
+  }, [power, triggerGlitch]);
+
   const Knob = ({
     label,
     value,
@@ -486,8 +563,8 @@ export default function SpeakNGlitch() {
           </div>
         </div>
 
-        {/* Mode and Action Buttons */}
-        <div className="flex gap-2 mb-4 justify-center">
+        {/* Mode and Action Buttons — row 1 */}
+        <div className="flex gap-2 mb-2 justify-center flex-wrap">
           <button
             onClick={() => setSpeakMode("letter")}
             className="px-3 py-1 text-xs font-mono font-bold rounded tracking-wider"
@@ -546,6 +623,34 @@ export default function SpeakNGlitch() {
             }}
           >
             CLR
+          </button>
+        </div>
+
+        {/* Action Buttons — row 2 */}
+        <div className="flex gap-2 mb-4 justify-center flex-wrap">
+          <button
+            onClick={handleRandomWord}
+            className="px-3 py-1 text-xs font-mono font-bold rounded tracking-wider"
+            style={{
+              background: "#002a1a",
+              color: "#00ffaa",
+              border: "2px solid #00ffaa",
+              boxShadow: "0 0 8px rgba(0,255,170,0.35)",
+            }}
+          >
+            🎲 RAND WORD
+          </button>
+          <button
+            onClick={handleRandomizeFX}
+            className="px-3 py-1 text-xs font-mono font-bold rounded tracking-wider"
+            style={{
+              background: "#1a1000",
+              color: "#ffcc00",
+              border: "2px solid #ffcc00",
+              boxShadow: "0 0 8px rgba(255,204,0,0.35)",
+            }}
+          >
+            🎰 RAND FX
           </button>
         </div>
 
