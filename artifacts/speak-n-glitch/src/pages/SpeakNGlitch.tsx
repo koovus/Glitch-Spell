@@ -78,9 +78,14 @@ export default function SpeakNGlitch() {
   const [speakMode, setSpeakMode] = useState<"letter" | "word">("letter");
   const [scanLine, setScanLine] = useState(0);
   const [ledBlink, setLedBlink] = useState(false);
+  const [ambientMode, setAmbientMode] = useState(false);
+  const [ambientGeneration, setAmbientGeneration] = useState(0);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const glitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ambientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const paramsRef = useRef(params);
+  const displayTextRef = useRef(displayText);
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
@@ -105,6 +110,136 @@ export default function SpeakNGlitch() {
     }, power ? 1200 : 300);
     return () => clearInterval(blinkInterval);
   }, [power]);
+
+  // Keep refs in sync so the ambient loop always reads latest values
+  useEffect(() => { paramsRef.current = params; }, [params]);
+  useEffect(() => { displayTextRef.current = displayText; }, [displayText]);
+
+  // Stop ambient when power goes off
+  useEffect(() => {
+    if (!power && ambientMode) {
+      setAmbientMode(false);
+      if (ambientTimerRef.current) clearTimeout(ambientTimerRef.current);
+      window.speechSynthesis.cancel();
+    }
+  }, [power, ambientMode]);
+
+  // Ambient loop
+  useEffect(() => {
+    if (!ambientMode || !power) return;
+
+    let cancelled = false;
+
+    const speakAmbient = () => {
+      if (cancelled) return;
+
+      const p = paramsRef.current;
+      const text = displayTextRef.current || "ECHO";
+
+      const ctx = audioCtxRef.current;
+      if (!ctx || ctx.state === "closed") return;
+      if (ctx.state === "suspended") ctx.resume();
+
+      // Speak the text
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices();
+      const robotVoice = voices.find(
+        (v) =>
+          v.name.toLowerCase().includes("samantha") ||
+          v.name.toLowerCase().includes("google us") ||
+          v.name.toLowerCase().includes("zira") ||
+          v.name.toLowerCase().includes("microsoft")
+      );
+      if (robotVoice) utterance.voice = robotVoice;
+      utterance.rate = 0.4 + p.pitch * 0.6;
+      utterance.pitch = 0.1 + p.pitch * 1.2;
+      utterance.volume = 0.85;
+      window.speechSynthesis.speak(utterance);
+
+      // Drone oscillator layer for ambient texture
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0, ctx.currentTime);
+      masterGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 1.5);
+
+      const delayNode = ctx.createDelay(4.0);
+      delayNode.delayTime.value = Math.min(0.05 + p.delayTime * 1.5, 3.8);
+
+      const feedbackGain = ctx.createGain();
+      feedbackGain.gain.value = Math.min(p.feedback * 0.88, 0.87);
+
+      const reverbLen = ctx.sampleRate * (2 + p.reverb * 6);
+      const reverbBuf = ctx.createBuffer(2, reverbLen, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = reverbBuf.getChannelData(ch);
+        for (let i = 0; i < reverbLen; i++) {
+          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / reverbLen, 1.2);
+        }
+      }
+      const convolver = ctx.createConvolver();
+      convolver.buffer = reverbBuf;
+
+      const reverbGain = ctx.createGain();
+      reverbGain.gain.value = Math.min(p.reverb * 1.2, 1.0);
+
+      const dryGain = ctx.createGain();
+      dryGain.gain.value = Math.max(0.05, 1 - p.reverb * 0.9);
+
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = "lowpass";
+      lowpass.frequency.value = 600 + p.filterFreq * 4000;
+      lowpass.Q.value = 1.5;
+
+      // Two detuned drones
+      const droneFreqs = [55, 82.5];
+      droneFreqs.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = i === 0 ? "sawtooth" : "triangle";
+        osc.frequency.value = freq * (1 + (Math.random() - 0.5) * 0.02);
+        g.gain.value = 0.06;
+        osc.connect(g);
+        g.connect(lowpass);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 5);
+      });
+
+      lowpass.connect(dryGain);
+      lowpass.connect(convolver);
+      convolver.connect(reverbGain);
+      dryGain.connect(delayNode);
+      reverbGain.connect(delayNode);
+      delayNode.connect(feedbackGain);
+      feedbackGain.connect(delayNode);
+      delayNode.connect(masterGain);
+      dryGain.connect(masterGain);
+      reverbGain.connect(masterGain);
+
+      masterGain.gain.setTargetAtTime(0, ctx.currentTime + 4, 1.5);
+      masterGain.connect(ctx.destination);
+
+      // Drift reverb and delay upward each generation
+      setParams((prev) => ({
+        ...prev,
+        reverb: Math.min(prev.reverb + 0.025, 0.96),
+        delayTime: Math.min(prev.delayTime + 0.02, 0.96),
+        feedback: Math.min(prev.feedback + 0.01, 0.87),
+      }));
+      setAmbientGeneration((g) => g + 1);
+
+      // Schedule next iteration: 5-9 seconds
+      const next = 5000 + Math.random() * 4000;
+      ambientTimerRef.current = setTimeout(speakAmbient, next);
+    };
+
+    // Kick off first play after a short pause
+    ambientTimerRef.current = setTimeout(speakAmbient, 1500);
+
+    return () => {
+      cancelled = true;
+      if (ambientTimerRef.current) clearTimeout(ambientTimerRef.current);
+    };
+  }, [ambientMode, power]);
 
   const createReverbBuffer = useCallback((ctx: AudioContext, seconds: number, decay: number) => {
     const length = ctx.sampleRate * seconds;
@@ -389,6 +524,20 @@ export default function SpeakNGlitch() {
     triggerGlitch();
   }, [power, triggerGlitch]);
 
+  const handleToggleAmbient = useCallback(() => {
+    if (!power) return;
+    const nextAmbient = !ambientMode;
+    if (nextAmbient) {
+      // Ensure AudioContext exists before the loop runs
+      getAudioCtx();
+    } else {
+      if (ambientTimerRef.current) clearTimeout(ambientTimerRef.current);
+      window.speechSynthesis.cancel();
+    }
+    setAmbientMode(nextAmbient);
+    setAmbientGeneration(0);
+  }, [power, ambientMode, getAudioCtx]);
+
   const Knob = ({
     label,
     value,
@@ -561,6 +710,26 @@ export default function SpeakNGlitch() {
           >
             {power ? (displayContent || "▮") : "- - - - - -"}
           </div>
+          {ambientMode && power && (
+            <div
+              className="flex items-center justify-between mt-2"
+              style={{ borderTop: "1px solid #1a3a1a", paddingTop: "6px" }}
+            >
+              <span
+                className="text-xs font-mono tracking-widest"
+                style={{
+                  color: "#44ccff",
+                  textShadow: "0 0 6px #44ccff",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                }}
+              >
+                ◉ AMBIENT DRIFT
+              </span>
+              <span className="text-xs font-mono" style={{ color: "#226688" }}>
+                GEN {ambientGeneration} · VERB {Math.round(params.reverb * 100)} · DLY {Math.round(params.delayTime * 100)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Mode and Action Buttons — row 1 */}
@@ -651,6 +820,19 @@ export default function SpeakNGlitch() {
             }}
           >
             🎰 RAND FX
+          </button>
+          <button
+            onClick={handleToggleAmbient}
+            className="px-3 py-1 text-xs font-mono font-bold rounded tracking-wider"
+            style={{
+              background: ambientMode ? "#001833" : "#000d1a",
+              color: ambientMode ? "#44ccff" : "#226688",
+              border: `2px solid ${ambientMode ? "#44ccff" : "#226688"}`,
+              boxShadow: ambientMode ? "0 0 12px rgba(68,204,255,0.5), 0 0 24px rgba(68,204,255,0.2)" : "none",
+              animation: ambientMode ? "pulse 2s ease-in-out infinite" : "none",
+            }}
+          >
+            {ambientMode ? `◉ AMBIENT ×${ambientGeneration}` : "◎ AMBIENT"}
           </button>
         </div>
 
