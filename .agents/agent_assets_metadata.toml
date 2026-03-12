@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "7siHTfUFPbVzxPkcg8IiV"
+uri = "file://README.md"
+type = "text"
+title = "SPEAK 'N GL1TCH — README"
