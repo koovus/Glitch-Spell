@@ -936,6 +936,43 @@ export default function SpeakNGlitch() {
               </button>
             ))}
           </div>
+
+          {/* Spacebar */}
+          <div className="flex justify-center mt-1.5">
+            <button
+              onClick={() => {
+                if (!power) return;
+                setActiveKey("SPACE");
+                setDisplayText((prev) => {
+                  const next = prev + " ";
+                  return next.length > 32 ? " " : next;
+                });
+                setTimeout(() => setActiveKey(null), 150);
+              }}
+              className="rounded font-black tracking-widest transition-all duration-75"
+              style={{
+                width: "220px",
+                height: "28px",
+                background:
+                  activeKey === "SPACE"
+                    ? "linear-gradient(145deg, #ffdd44, #ffa000)"
+                    : "linear-gradient(145deg, #2a2a2a, #1a1a1a)",
+                color: activeKey === "SPACE" ? "#1a0800" : "#666",
+                border: `2px solid ${activeKey === "SPACE" ? "#ffdd44" : "#444"}`,
+                boxShadow:
+                  activeKey === "SPACE"
+                    ? "0 0 12px rgba(255,220,68,0.6), 0 2px 0 rgba(0,0,0,0.5)"
+                    : "0 2px 0 rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)",
+                transform: activeKey === "SPACE" ? "translateY(2px) scale(0.98)" : "translateY(0) scale(1)",
+                cursor: power ? "pointer" : "not-allowed",
+                opacity: power ? 1 : 0.4,
+                fontSize: "10px",
+                letterSpacing: "0.3em",
+              }}
+            >
+              SPACE
+            </button>
+          </div>
         </div>
 
         {/* FX Knobs */}
