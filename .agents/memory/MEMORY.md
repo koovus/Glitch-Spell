@@ -1,0 +1,1 @@
+- [pnpm audit fixes](pnpm-audit-fixes.md) — nested audit commands edit shared workspace overrides; inspect auto-fixes for incompatible major upgrades.
